@@ -128,6 +128,9 @@ public struct SwipeOptions {
     /// The corner radius that encompasses all actions.
     var actionsMaskCornerRadius = Double(20)
 
+    /// The corner style for both the mask and individual actions.
+    var actionsCornerStyle = RoundedCornerStyle.continuous
+
     /// At what point the actions start becoming visible.
     var actionsVisibleStartPoint = Double(50)
 
@@ -585,7 +588,7 @@ extension SwipeView {
         .mask(
             Color.clear.overlay(
                 /// Clip the swipe actions as they're being revealed.
-                RoundedRectangle(cornerRadius: options.actionsMaskCornerRadius, style: .continuous)
+                RoundedRectangle(cornerRadius: options.actionsMaskCornerRadius, style: options.actionsCornerStyle)
                     .frame(width: visibleWidth),
                 alignment: side.alignment
             )
@@ -679,7 +682,7 @@ struct SwipeActionsLayout: _VariadicView_UnaryViewRoot {
                             .frame(width: width)
                             .opacity(shown ? 1 : 0)
                             .mask(
-                                RoundedRectangle(cornerRadius: options.actionCornerRadius, style: .continuous)
+                                RoundedRectangle(cornerRadius: options.actionCornerRadius, style: options.actionsCornerStyle)
                             ),
                         alignment: side.edgeTriggerAlignment
                     )
@@ -690,7 +693,7 @@ struct SwipeActionsLayout: _VariadicView_UnaryViewRoot {
                         .frame(width: width)
                         .opacity(shown ? 1 : 0)
                         .mask(
-                            RoundedRectangle(cornerRadius: options.actionCornerRadius, style: .continuous)
+                            RoundedRectangle(cornerRadius: options.actionCornerRadius, style: options.actionsCornerStyle)
                         )
                 }
             }
@@ -1160,6 +1163,13 @@ public extension SwipeView {
     func swipeActionCornerRadius(_ value: Double) -> SwipeView {
         var view = self
         view.options.actionCornerRadius = value
+        return view
+    }
+
+    /// The corner style for actions and the actions mask.
+    func swipeActionsCornerStyle(_ value: RoundedCornerStyle) -> SwipeView {
+        var view = self
+        view.options.actionsCornerStyle = value
         return view
     }
 

@@ -676,10 +676,12 @@ struct SwipeActionsLayout: _VariadicView_UnaryViewRoot {
                         }
                     }()
 
+                    let clampedWidth = width.map { max(0, $0) }
+
                     Color.clear.overlay(
                         child
                             .frame(maxHeight: .infinity)
-                            .frame(width: width)
+                            .frame(width: clampedWidth)
                             .opacity(shown ? 1 : 0)
                             .mask(
                                 RoundedRectangle(cornerRadius: options.actionCornerRadius, style: options.actionsCornerStyle)
@@ -688,9 +690,11 @@ struct SwipeActionsLayout: _VariadicView_UnaryViewRoot {
                     )
                     .zIndex(Double(zIndex))
                 } else {
+                    let clampedWidth = width.map { max(0, $0) }
+
                     child
                         .frame(maxHeight: .infinity)
-                        .frame(width: width)
+                        .frame(width: clampedWidth)
                         .opacity(shown ? 1 : 0)
                         .mask(
                             RoundedRectangle(cornerRadius: options.actionCornerRadius, style: options.actionsCornerStyle)

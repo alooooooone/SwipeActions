@@ -26,6 +26,7 @@ let package = Package(
             name: "SwipeActions",
             dependencies: [],
             path: "Sources"
-        )
+        ),
+        .testTarget(name: "SwipeActionsTests", dependencies: ["SwipeActions"])
     ]
 )

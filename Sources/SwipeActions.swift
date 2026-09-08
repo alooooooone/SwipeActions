@@ -455,7 +455,7 @@ public struct SwipeView<Label, LeadingActions, TrailingActions>: View where Labe
         .onChange(of: currentlyDragging) { currentlyDragging in /// Detect gesture cancellations.
             if !currentlyDragging, let latestDragGestureValueBackup {
                 /// Gesture cancelled.
-                let velocity = velocity.dx / currentOffset
+                let velocity = SwipeMotion.normalizedVelocity(velocity.dx, offset: currentOffset)
                 end(value: latestDragGestureValueBackup, velocity: velocity)
             }
         }
@@ -822,7 +822,7 @@ extension SwipeView {
     }
 
     func close(velocity: Double) {
-        withAnimation(.interpolatingSpring(stiffness: options.offsetTriggerAnimationStiffness, damping: options.offsetTriggerAnimationDamping, initialVelocity: velocity)) {
+        withAnimation(.interpolatingSpring(stiffness: options.offsetCloseAnimationStiffness, damping: options.offsetCloseAnimationDamping, initialVelocity: velocity)) {
             savedOffset = 0
             currentOffset = 0
         }
@@ -943,7 +943,7 @@ extension SwipeView {
 
     func onEnded(value: DragGesture.Value) {
         latestDragGestureValueBackup = nil
-        let velocity = velocity.dx / currentOffset
+        let velocity = SwipeMotion.normalizedVelocity(velocity.dx, offset: currentOffset)
         end(value: value, velocity: velocity)
     }
 
@@ -1383,6 +1383,7 @@ struct GestureVelocity: DynamicProperty {
         }
 
         let timeDelta = current.time.timeIntervalSince(previous.time)
+        guard timeDelta > 0, timeDelta.isFinite else { return .zero }
 
         let speedY = Double(
             current.translation.height - previous.translation.height

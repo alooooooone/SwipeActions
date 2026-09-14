@@ -8,8 +8,8 @@ Add customizable swipe actions to any view.
 - Fine-tune animations and styling to your taste.
 - Programmatically show/hide swipe actions.
 - Automatically close when interacting with other views.
-- Made with 100% SwiftUI. Supports iOS 14+.
-- Lightweight, no dependencies. One file.
+- SwiftUI views with optional UIKit gesture input. Supports iOS 14+.
+- Lightweight, no dependencies.
 
 
 ![General](Assets/General.png) | ![Basics](Assets/Basics.png) | ![Customization](Assets/Customization.png)
@@ -20,7 +20,7 @@ Add customizable swipe actions to any view.
 
 ### Installation
 
-SwipeActions is available via the [Swift Package Manager](https://developer.apple.com/documentation/swift_packages/adding_package_dependencies_to_your_app). Alternatively, because all of SwipeActions is contained within a single file, drag [`SwipeActions.swift`](https://github.com/aheze/SwipeActions/blob/main/Sources/SwipeActions.swift) into your project. Requires iOS 14+.
+SwipeActions is available via the [Swift Package Manager](https://developer.apple.com/documentation/swift_packages/adding_package_dependencies_to_your_app). For this local version, use the package or copy all Swift files in [`Sources`](Sources) into your project. Requires iOS 14+; the optional UIKit gesture input requires iOS 18+.
 
 ```
 https://github.com/aheze/SwipeActions
@@ -169,6 +169,26 @@ func swipeOffsetTriggerAnimation(stiffness: Double, damping: Double)
 Example usage of these modifiers is available in the [example app](https://github.com/aheze/SwipeActions/archive/refs/heads/main.zip).
 
 ### Notes
+
+#### Directional UIKit input (local extension)
+
+On iOS 18+, opt in with `.swipeUsesUIKitHorizontalPan()`. The default remains the original SwiftUI input. The UIKit recognizer rejects vertical/diagonal intent before recognition, lets ancestor scroll views take those drags, and locks an accepted drag horizontally. Cancellation closes without triggering an action. The ordinary drag follows the finger without implicit animation; release uses a single CADisplayLink-driven presentation position with the configured springs and a short bounded velocity projection. The row, actions and reveal mask share that position; interrupting a settlement takes over the visible position rather than its target. Resistance starts with a continuous slope, and single trigger-action labels animate continuously toward the dragged edge after crossing the trigger threshold and reverse from their current progress when pulled back.
+
+```swift
+SwipeView { /* row */ } leadingActions: { _ in
+    SwipeAction("Show") { }
+} trailingActions: { _ in
+    SwipeAction("Remove") { }.allowSwipeToTrigger()
+}
+.swipeUsesUIKitHorizontalPan()
+.swipeMinimumDistance(8)
+.swipeHorizontalIntentRatio(1.5) // Horizontal travel must be > 1.5 × vertical travel.
+.swipeStretchRubberBandingPower(0.5)
+.swipeOffsetCloseAnimation(stiffness: 90, damping: 20)
+.swipeOffsetExpandAnimation(stiffness: 90, damping: 20)
+```
+
+For UIKit input, non-triggering actions begin resisting at their expanded width. Triggering actions keep following the finger through the configured trigger threshold. `swipeMinimumDistance` controls horizontal recognition; vertical intent is rejected as early as 4 pt to avoid delaying scroll. Increase the intent ratio to favor scrolling more strongly. `swipeMinimumPointToTrigger` is a separate distance for committing an action, not the recognition threshold. iOS 14–17 retain the SwiftUI input even when opted in.
 
 - To automatically close swipe views when another one is swiped (accordion style), use `SwipeViewGroup`.
 

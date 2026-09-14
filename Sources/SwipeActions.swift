@@ -86,6 +86,9 @@ public enum SwipeSide {
 
 /// Context for the swipe action.
 public struct SwipeContext {
+    /// Keep label geometry continuous while the UIKit presentation position changes.
+    var usesContinuousPresentation = false
+
     /// The current state.
     public var state: Binding<SwipeState?>
 
@@ -118,6 +121,8 @@ public enum SwipeActionStyle {
 public struct SwipeOptions {
     /// If swiping is currently enabled.
     var swipeEnabled = true
+    var usesUIKitHorizontalPan = false
+    var horizontalIntentRatio = Double(1.5)
 
     /// The minimum distance needed to drag to start the gesture. Should be more than 0 for best compatibility with other gestures/buttons.
     var swipeMinimumDistance = Double(2)
@@ -264,6 +269,40 @@ public struct SwipeAction<Label: View, Background: View>: View {
 
     /// Keeps track of whether the action is pressed/triggered or not.
     @State var highlighted = false
+    @State private var continuousLabelWidth = Double(0)
+    @StateObject private var labelTravel = SwipePresentationMotion(positionTolerance: 0.001, velocityTolerance: 0.01)
+
+    private var movesLabelToEdge: Bool {
+        allowSwipeToTrigger == true && swipeContext.numberOfActions == 1 &&
+            (swipeContext.state.wrappedValue == .triggering || swipeContext.state.wrappedValue == .triggered)
+    }
+
+    private func updateLabelTravel() {
+        guard swipeContext.usesContinuousPresentation else { return }
+        labelTravel.settle(to: movesLabelToEdge ? 1 : 0, stiffness: 110, damping: 22)
+    }
+
+    @ViewBuilder
+    private func actionLabel(opacity: Double) -> some View {
+        if swipeContext.usesContinuousPresentation {
+            GeometryReader { geometry in
+                label(highlighted)
+                    .opacity(opacity)
+                    .fixedSize(horizontal: labelFixedSize, vertical: labelFixedSize)
+                    .padding(.horizontal, labelHorizontalPadding)
+                    .readSize { continuousLabelWidth = $0.width }
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .offset(x: Double(swipeContext.side.signWhenDragged)
+                            * max(0, geometry.size.width - continuousLabelWidth) / 2
+                            * labelTravel.position)
+            }
+        } else {
+            label(highlighted)
+                .opacity(opacity)
+                .fixedSize(horizontal: labelFixedSize, vertical: labelFixedSize)
+                .padding(.horizontal, labelHorizontalPadding)
+        }
+    }
 
     /// For use in `SwipeView`'s `leading` or `trailing` side.
     public init(
@@ -279,6 +318,7 @@ public struct SwipeAction<Label: View, Background: View>: View {
     public var body: some View {
         /// Usually `.center`, but if there's only one action and it's triggered, move it closer to the center.
         let labelAlignment: Alignment = {
+            if swipeContext.usesContinuousPresentation { return .center }
             guard let allowSwipeToTrigger, allowSwipeToTrigger else { return .center }
             if swipeContext.numberOfActions == 1 {
                 if swipeContext.state.wrappedValue == .triggering || swipeContext.state.wrappedValue == .triggered {
@@ -299,14 +339,14 @@ public struct SwipeAction<Label: View, Background: View>: View {
         Button(action: action) {
             background(highlighted)
                 .overlay(
-                    label(highlighted)
-                        .opacity(labelOpacity)
-                        .fixedSize(horizontal: labelFixedSize, vertical: labelFixedSize)
-                        .padding(.horizontal, labelHorizontalPadding),
+                    actionLabel(opacity: labelOpacity),
                     alignment: labelAlignment
                 )
         }
         .opacity(totalOpacity)
+        .onAppear { updateLabelTravel() }
+        .onChange(of: movesLabelToEdge) { _ in updateLabelTravel() }
+        .onDisappear { labelTravel.stop() }
         ._onButtonGesture { pressing in
             self.highlighted = pressing
         } perform: {}
@@ -383,9 +423,12 @@ public struct SwipeView<Label, LeadingActions, TrailingActions>: View where Labe
 
     /// When you touch down with a second finger, the drag gesture freezes, but `currentlyDragging` will be accurate.
     @GestureState var currentlyDragging = false
+    @State private var latestUIKitTranslation = Double(0)
+    @State var currentlyUIKitDragging = false
+    @StateObject private var presentation = SwipePresentationMotion()
 
     /// Upon a gesture freeze / cancellation, use this to end the gesture.
-    @State var latestDragGestureValueBackup: DragGesture.Value?
+    @State var latestDragGestureValueBackup: SwipeDragValue?
 
     /// The gesture's current velocity.
     @GestureVelocity var velocity: CGVector
@@ -407,7 +450,7 @@ public struct SwipeView<Label, LeadingActions, TrailingActions>: View where Labe
         self.trailingActions = trailingActions
     }
 
-    public var body: some View {
+    private var swipeContent: some View {
         HStack {
             label()
                 .offset(x: offset) /// Apply the offset here.
@@ -440,26 +483,54 @@ public struct SwipeView<Label, LeadingActions, TrailingActions>: View where Labe
             alignment: .trailing
         )
 
-        // MARK: - Add gestures
+    }
 
-        .highPriorityGesture( /// Add the drag gesture.
-            DragGesture(minimumDistance: options.swipeMinimumDistance)
-                .updating($currentlyDragging) { value, state, transaction in
-                    state = true
+    @ViewBuilder
+    private var gestureContent: some View {
+        if usesUIKitHorizontalPan {
+            swipeContent
+                .modifier(SwipeHorizontalPanModifier(
+                    enabled: options.swipeEnabled,
+                    minimumDistance: options.swipeMinimumDistance,
+                    intentRatio: options.horizontalIntentRatio,
+                    onChange: updateUIKitDrag,
+                    onEnd: endUIKitDrag,
+                    onCancel: cancelUIKitDrag
+                ))
+        } else {
+            swipeContent
+                .highPriorityGesture(
+                    DragGesture(minimumDistance: options.swipeMinimumDistance)
+                        .updating($currentlyDragging) { _, state, _ in state = true }
+                        .onChanged { onChanged(value: SwipeDragValue($0)) }
+                        .onEnded { onEnded(value: SwipeDragValue($0)) }
+                        .updatingVelocity($velocity),
+                    including: options.swipeEnabled ? .all : .subviews
+                )
+                .onChange(of: currentlyDragging) { currentlyDragging in
+                    if !currentlyDragging, let latestDragGestureValueBackup {
+                        let velocity = SwipeMotion.normalizedVelocity(velocity.dx, offset: currentOffset)
+                        end(value: latestDragGestureValueBackup, velocity: velocity)
+                    }
                 }
-                .onChanged(onChanged)
-                .onEnded(onEnded)
-                .updatingVelocity($velocity),
-            including: options.swipeEnabled ? .all : .subviews /// Enable/disable swiping here.
-        )
-        .onChange(of: currentlyDragging) { currentlyDragging in /// Detect gesture cancellations.
-            if !currentlyDragging, let latestDragGestureValueBackup {
-                /// Gesture cancelled.
-                let velocity = SwipeMotion.normalizedVelocity(velocity.dx, offset: currentOffset)
-                end(value: latestDragGestureValueBackup, velocity: velocity)
-            }
         }
+    }
 
+    public var body: some View {
+        gestureContent
+        .onDisappear {
+            guard usesUIKitHorizontalPan else { return }
+            // List may retain a removed row for its transition and reuse it on undo.
+            // Do not leave that row parked at an interrupted full-swipe position.
+            presentation.stop()
+            presentation.track(0)
+            savedOffset = 0
+            currentOffset = 0
+            currentlyUIKitDragging = false
+            currentSide = nil
+            leadingState = .closed
+            trailingState = .closed
+        }
         // MARK: - Trigger haptics
 
         .onChange(of: leadingState) { [leadingState] newValue in
@@ -487,7 +558,7 @@ public struct SwipeView<Label, LeadingActions, TrailingActions>: View where Labe
 
         // MARK: - Receive `SwipeViewGroup` events
 
-        .onChange(of: currentlyDragging) { newValue in
+        .onChange(of: currentlyDragging || currentlyUIKitDragging) { newValue in
             if newValue {
                 swipeViewGroupSelection.wrappedValue = id
             }
@@ -556,6 +627,7 @@ extension SwipeView {
                 numberOfActions: numberOfActions,
                 side: side,
                 options: options,
+                usesContinuousPresentation: usesUIKitHorizontalPan,
                 state: state.wrappedValue,
                 visibleWidth: visibleWidth
             )
@@ -576,11 +648,12 @@ extension SwipeView {
             }
 
             let context = SwipeContext(
+                usesContinuousPresentation: usesUIKitHorizontalPan,
                 state: stateBinding,
                 numberOfActions: numberOfActions.wrappedValue,
                 side: side,
                 opacity: opacity,
-                currentlyDragging: currentlyDragging
+                currentlyDragging: currentlyDragging || currentlyUIKitDragging
             )
 
             actions(context) /// Call the `actions` view and pass in context.
@@ -602,6 +675,7 @@ struct SwipeActionsLayout: _VariadicView_UnaryViewRoot {
     @Binding var numberOfActions: Int
     var side: SwipeSide
     var options: SwipeOptions
+    var usesContinuousPresentation: Bool
     var state: SwipeState?
     var visibleWidth: Double
 
@@ -703,7 +777,7 @@ struct SwipeActionsLayout: _VariadicView_UnaryViewRoot {
             }
         }
         .frame(width: options.actionsStyle == .cascade ? visibleWidth : nil)
-        .animation(options.actionContentTriggerAnimation, value: state)
+        .animation(usesContinuousPresentation ? nil : options.actionContentTriggerAnimation, value: state)
         .onAppear { /// Set the number of actions here.
             numberOfActions = children.count
         }
@@ -718,7 +792,7 @@ struct SwipeActionsLayout: _VariadicView_UnaryViewRoot {
 extension SwipeView {
     /// The total offset of the content.
     var offset: Double {
-        currentOffset + savedOffset
+        usesUIKitHorizontalPan ? presentation.position : currentOffset + savedOffset
     }
 
     /// Calculate the total width for actions.
@@ -822,6 +896,13 @@ extension SwipeView {
     }
 
     func close(velocity: Double) {
+        if usesUIKitHorizontalPan {
+            savedOffset = 0
+            currentOffset = 0
+            presentation.settle(to: savedOffset, stiffness: options.offsetCloseAnimationStiffness,
+                                damping: options.offsetCloseAnimationDamping)
+            return
+        }
         withAnimation(.interpolatingSpring(stiffness: options.offsetCloseAnimationStiffness, damping: options.offsetCloseAnimationDamping, initialVelocity: velocity)) {
             savedOffset = 0
             currentOffset = 0
@@ -829,6 +910,13 @@ extension SwipeView {
     }
 
     func trigger(side: SwipeSide, velocity: Double) {
+        if usesUIKitHorizontalPan {
+            savedOffset = side == .leading ? leadingTriggeredOffset : trailingTriggeredOffset
+            currentOffset = 0
+            presentation.settle(to: savedOffset, stiffness: options.offsetTriggerAnimationStiffness,
+                                damping: options.offsetTriggerAnimationDamping)
+            return
+        }
         withAnimation(.interpolatingSpring(stiffness: options.offsetTriggerAnimationStiffness, damping: options.offsetTriggerAnimationDamping, initialVelocity: velocity)) {
             switch side {
             case .leading:
@@ -841,6 +929,13 @@ extension SwipeView {
     }
 
     func expand(side: SwipeSide, velocity: Double) {
+        if usesUIKitHorizontalPan {
+            savedOffset = side == .leading ? leadingExpandedOffset : trailingExpandedOffset
+            currentOffset = 0
+            presentation.settle(to: savedOffset, stiffness: options.offsetExpandAnimationStiffness,
+                                damping: options.offsetExpandAnimationDamping)
+            return
+        }
         withAnimation(.interpolatingSpring(stiffness: options.offsetExpandAnimationStiffness, damping: options.offsetExpandAnimationDamping, initialVelocity: velocity)) {
             switch side {
             case .leading:
@@ -856,7 +951,51 @@ extension SwipeView {
 // MARK: - Gestures
 
 extension SwipeView {
-    func onChanged(value: DragGesture.Value) {
+    var usesUIKitHorizontalPan: Bool {
+        if #available(iOS 18.0, *) { return options.usesUIKitHorizontalPan }
+        return false
+    }
+
+    func updateUIKitDrag(_ value: SwipeDragValue) {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            if !currentlyUIKitDragging {
+                presentation.stop()
+                savedOffset = dragOrigin(for: presentation.position)
+                currentOffset = 0
+            }
+            currentlyUIKitDragging = true
+            if swipeViewGroupSelection.wrappedValue != id {
+                swipeViewGroupSelection.wrappedValue = id
+            }
+            // UIPan sends .began with zero translation; don't lock that sample to the wrong side.
+            if currentSide == nil, value.translation.width != 0 {
+                currentSide = value.translation.width > 0 ? .leading : .trailing
+            }
+            change(value: value)
+            latestUIKitTranslation = value.translation.width
+            presentation.track(savedOffset + currentOffset)
+        }
+    }
+
+    func endUIKitDrag(_ value: SwipeDragValue) {
+        // Consume the last sample before deciding, including a last-moment pull back.
+        if value.translation.width != latestUIKitTranslation { updateUIKitDrag(value) }
+        currentlyUIKitDragging = false
+        end(value: value, velocity: 0)
+    }
+
+    func cancelUIKitDrag() {
+        guard currentlyUIKitDragging else { return }
+        currentlyUIKitDragging = false
+        currentSide = nil
+        leadingState = .closed
+        trailingState = .closed
+        close(velocity: 0)
+    }
+
+    func onChanged(value: SwipeDragValue) {
         /// Back up the value.
         latestDragGestureValueBackup = value
 
@@ -869,16 +1008,36 @@ extension SwipeView {
                 currentSide = .trailing
             }
 
-            /// The gesture just started, so animate the change (in case `swipeMinimumDistance > 0`).
-//            withAnimation(options.swipeMinimumDistanceAnimation) {
-//                change(value: value)
-//            }
         } else {
             change(value: value)
         }
     }
 
-    func change(value: DragGesture.Value) {
+    /// Undo the resistance mapping when a new drag takes over an overshooting frame.
+    /// Applying resistance twice would otherwise jump even on a zero-translation sample.
+    private func dragOrigin(for position: Double) -> Double {
+        let disallowed = getDisallowedSide(totalOffset: position)
+        if position > 0 {
+            let boundary = numberOfLeadingActions == 0 || disallowed == .leading ? 0 : leadingExpandedOffset
+            if (numberOfLeadingActions == 0 || disallowed == .leading || !swipeToTriggerLeadingEdge), position > boundary {
+                return boundary + SwipeMotion.unresistedDistance(position - boundary, power: options.stretchRubberBandingPower)
+            }
+        } else {
+            let boundary = numberOfTrailingActions == 0 || disallowed == .trailing ? 0 : trailingExpandedOffset
+            if (numberOfTrailingActions == 0 || disallowed == .trailing || !swipeToTriggerTrailingEdge), position < boundary {
+                return boundary - SwipeMotion.unresistedDistance(boundary - position, power: options.stretchRubberBandingPower)
+            }
+        }
+        return position
+    }
+
+    private func resistedDistance(_ distance: Double) -> Double {
+        usesUIKitHorizontalPan
+            ? SwipeMotion.resistedDistance(distance, power: options.stretchRubberBandingPower)
+            : pow(distance, options.stretchRubberBandingPower)
+    }
+
+    func change(value: SwipeDragValue) {
         /// The total offset of the swipe view.
         let totalOffset = savedOffset + value.translation.width
 
@@ -887,12 +1046,12 @@ extension SwipeView {
 
         /// Apply rubber banding if an empty side is reached, or if a side is disallowed.
         if numberOfLeadingActions == 0 || disallowedSide == .leading, totalOffset > 0 {
-            let constrainedExceededOffset = pow(totalOffset, options.stretchRubberBandingPower)
+            let constrainedExceededOffset = resistedDistance(totalOffset)
             currentOffset = constrainedExceededOffset - savedOffset
             leadingState = nil
             trailingState = nil
         } else if numberOfTrailingActions == 0 || disallowedSide == .trailing, totalOffset < 0 {
-            let constrainedExceededOffset = -pow(-totalOffset, options.stretchRubberBandingPower)
+            let constrainedExceededOffset = -resistedDistance(-totalOffset)
             currentOffset = constrainedExceededOffset - savedOffset
             leadingState = nil
             trailingState = nil
@@ -900,32 +1059,36 @@ extension SwipeView {
             /// Flag to keep track of whether `currentOffset` was set or not — if `false`, then set to the default of `value.translation.width`.
             var setCurrentOffset = false
 
-            if totalOffset > leadingReadyToTriggerOffset {
+            let leadingResistanceOffset = usesUIKitHorizontalPan && !swipeToTriggerLeadingEdge
+                ? leadingExpandedOffset : leadingReadyToTriggerOffset
+            if totalOffset > leadingResistanceOffset {
                 setCurrentOffset = true
                 if swipeToTriggerLeadingEdge {
                     currentOffset = value.translation.width
                     leadingState = .triggering
                     trailingState = nil
                 } else {
-                    let exceededOffset = totalOffset - leadingReadyToTriggerOffset
-                    let constrainedExceededOffset = pow(exceededOffset, options.stretchRubberBandingPower)
-                    let constrainedTotalOffset = leadingReadyToTriggerOffset + constrainedExceededOffset
+                    let exceededOffset = totalOffset - leadingResistanceOffset
+                    let constrainedExceededOffset = resistedDistance(exceededOffset)
+                    let constrainedTotalOffset = leadingResistanceOffset + constrainedExceededOffset
                     currentOffset = constrainedTotalOffset - savedOffset
                     leadingState = nil
                     trailingState = nil
                 }
             }
 
-            if totalOffset < trailingReadyToTriggerOffset {
+            let trailingResistanceOffset = usesUIKitHorizontalPan && !swipeToTriggerTrailingEdge
+                ? trailingExpandedOffset : trailingReadyToTriggerOffset
+            if totalOffset < trailingResistanceOffset {
                 setCurrentOffset = true
                 if swipeToTriggerTrailingEdge {
                     currentOffset = value.translation.width
                     trailingState = .triggering
                     leadingState = nil
                 } else {
-                    let exceededOffset = totalOffset - trailingReadyToTriggerOffset
-                    let constrainedExceededOffset = -pow(-exceededOffset, options.stretchRubberBandingPower)
-                    let constrainedTotalOffset = trailingReadyToTriggerOffset + constrainedExceededOffset
+                    let exceededOffset = totalOffset - trailingResistanceOffset
+                    let constrainedExceededOffset = -resistedDistance(-exceededOffset)
+                    let constrainedTotalOffset = trailingResistanceOffset + constrainedExceededOffset
                     currentOffset = constrainedTotalOffset - savedOffset
                     leadingState = nil
                     trailingState = nil
@@ -941,16 +1104,16 @@ extension SwipeView {
         }
     }
 
-    func onEnded(value: DragGesture.Value) {
+    func onEnded(value: SwipeDragValue) {
         latestDragGestureValueBackup = nil
         let velocity = SwipeMotion.normalizedVelocity(velocity.dx, offset: currentOffset)
         end(value: value, velocity: velocity)
     }
 
     /// Represents the end of a gesture.
-    func end(value: DragGesture.Value, velocity: CGFloat) {
+    func end(value: SwipeDragValue, velocity: CGFloat) {
         let totalOffset = savedOffset + value.translation.width
-        let totalPredictedOffset = (savedOffset + value.predictedEndTranslation.width) * 0.5
+        let totalPredictedOffset = (savedOffset + value.predictedEndTranslation.width) * (usesUIKitHorizontalPan ? 1 : 0.5)
 
         if getDisallowedSide(totalOffset: totalPredictedOffset) != nil {
             currentSide = nil
@@ -1121,6 +1284,20 @@ public extension SwipeAction {
 }
 
 public extension SwipeView {
+    /// Opt in to horizontal-only UIKit recognition on iOS 18+. Older systems retain DragGesture.
+    func swipeUsesUIKitHorizontalPan(_ value: Bool = true) -> SwipeView {
+        var view = self
+        view.options.usesUIKitHorizontalPan = value
+        return view
+    }
+
+    /// Horizontal travel must exceed vertical travel by this ratio. UIKit input only.
+    func swipeHorizontalIntentRatio(_ value: Double) -> SwipeView {
+        var view = self
+        view.options.horizontalIntentRatio = max(1, value)
+        return view
+    }
+
     /// If swiping is currently enabled.
     func swipeEnabled(_ value: Bool) -> SwipeView {
         var view = self

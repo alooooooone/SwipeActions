@@ -151,6 +151,10 @@ public struct SwipeOptions {
     /// Spacing between actions and the label view.
     var spacing = Double(8)
 
+    /// How far action backgrounds extend beyond the label's vertical edges.
+    var actionsTopOverflow = Double(0)
+    var actionsBottomOverflow = Double(0)
+
     /// The point where the user must drag to expand actions.
     var readyToExpandPadding = Double(50)
 
@@ -450,10 +454,23 @@ public struct SwipeView<Label, LeadingActions, TrailingActions>: View where Labe
         self.trailingActions = trailingActions
     }
 
+    @ViewBuilder
+    private var movingLabel: some View {
+        if options.actionsTopOverflow > 0 || options.actionsBottomOverflow > 0 {
+            label()
+                .offset(x: offset)
+                // Clip the translated label without clipping action backgrounds
+                // that intentionally extend beyond the row vertically.
+                .mask(Rectangle())
+        } else {
+            label()
+                .offset(x: offset)
+        }
+    }
+
     private var swipeContent: some View {
         HStack {
-            label()
-                .offset(x: offset) /// Apply the offset here.
+            movingLabel
         }
         .readSize { size = $0 } /// Read the size of the parent label.
         .background( /// Leading swipe actions.
@@ -658,6 +675,8 @@ extension SwipeView {
 
             actions(context) /// Call the `actions` view and pass in context.
         }
+        .frame(height: size.height + options.actionsTopOverflow + options.actionsBottomOverflow)
+        .offset(y: (options.actionsBottomOverflow - options.actionsTopOverflow) / 2)
         .mask(
             Color.clear.overlay(
                 /// Clip the swipe actions as they're being revealed.
@@ -1365,6 +1384,15 @@ public extension SwipeView {
     func swipeSpacing(_ value: Double) -> SwipeView {
         var view = self
         view.options.spacing = value
+        return view
+    }
+
+    /// Extend action backgrounds beyond the label's vertical edges.
+    /// Both values default to `0`, which preserves the row's original bounds.
+    func swipeActionsVerticalOverflow(top: Double = 0, bottom: Double = 0) -> SwipeView {
+        var view = self
+        view.options.actionsTopOverflow = max(0, top)
+        view.options.actionsBottomOverflow = max(0, bottom)
         return view
     }
 

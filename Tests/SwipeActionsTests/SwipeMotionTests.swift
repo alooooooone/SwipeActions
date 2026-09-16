@@ -1,7 +1,29 @@
+import SwiftUI
 import XCTest
 @testable import SwipeActions
 
 final class SwipeMotionTests: XCTestCase {
+    func testActionVerticalOverflowDefaultsToZeroAndClampsNegativeValues() {
+        let swipeView = SwipeView {
+            EmptyView()
+        } leadingActions: { _ in
+            EmptyView()
+        } trailingActions: { _ in
+            EmptyView()
+        }
+
+        XCTAssertEqual(swipeView.options.actionsTopOverflow, 0)
+        XCTAssertEqual(swipeView.options.actionsBottomOverflow, 0)
+
+        let clamped = swipeView.swipeActionsVerticalOverflow(top: -1, bottom: -2)
+        XCTAssertEqual(clamped.options.actionsTopOverflow, 0)
+        XCTAssertEqual(clamped.options.actionsBottomOverflow, 0)
+
+        let configured = swipeView.swipeActionsVerticalOverflow(top: 1, bottom: 2)
+        XCTAssertEqual(configured.options.actionsTopOverflow, 1)
+        XCTAssertEqual(configured.options.actionsBottomOverflow, 2)
+    }
+
     func testOvershootCanBeTakenOverWithoutApplyingResistanceTwice() {
         for position in [0.0, 0.5, 8, 40, 100] {
             let origin = SwipeMotion.unresistedDistance(position, power: 0.5)

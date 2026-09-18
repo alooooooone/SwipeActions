@@ -117,6 +117,21 @@ public enum SwipeActionStyle {
     case cascade
 }
 
+enum SwipeActionAppearance {
+    static func revealOpacity(
+        draggedLength: Double,
+        startPoint: Double,
+        endPoint: Double
+    ) -> Double {
+        guard endPoint > startPoint else {
+            return draggedLength >= endPoint ? 1 : 0
+        }
+
+        let revealedLength = max(0, draggedLength - startPoint)
+        return min(1, revealedLength / (endPoint - startPoint))
+    }
+}
+
 /// Options for configuring the swipe view.
 public struct SwipeOptions {
     /// If swiping is currently enabled.
@@ -257,6 +272,9 @@ public struct SwipeAction<Label: View, Background: View>: View {
     /// Whether to ramp the opacity of the entire view or just the label.
     public var changeLabelVisibilityOnly = false
 
+    /// Black overlay applied while pressed or ready to trigger.
+    public var highlightDarkening = Double(0.12)
+
     /// Code to run when the action triggers.
     public var action: () -> Void
 
@@ -342,6 +360,12 @@ public struct SwipeAction<Label: View, Background: View>: View {
 
         Button(action: action) {
             background(highlighted)
+                .overlay {
+                    Color.black
+                        .opacity(highlighted ? highlightDarkening : 0)
+                        .allowsHitTesting(false)
+                        .animation(.easeOut(duration: 0.12), value: highlighted)
+                }
                 .overlay(
                     actionLabel(opacity: labelOpacity),
                     alignment: labelAlignment
@@ -626,18 +650,11 @@ extension SwipeView {
             return width
         }()
 
-        let opacity: Double = {
-            /// Subtract the start point from the dragged length, which cancels it out initially.
-            let offset = max(0, draggedLength - options.actionsVisibleStartPoint)
-
-            /// Calculate the opacity percent.
-            let percent = offset / (options.actionsVisibleEndPoint - options.actionsVisibleStartPoint)
-
-            /// Make sure the opacity doesn't exceed 1.
-            let opacity = min(1, percent)
-
-            return opacity
-        }()
+        let opacity = SwipeActionAppearance.revealOpacity(
+            draggedLength: draggedLength,
+            startPoint: options.actionsVisibleStartPoint,
+            endPoint: options.actionsVisibleEndPoint
+        )
 
         _VariadicView.Tree(
             SwipeActionsLayout(
@@ -1176,7 +1193,8 @@ public extension SwipeAction where Label == Text, Background == Color {
     init(
         _ title: LocalizedStringKey,
         backgroundColor: Color = Color.primary.opacity(0.1),
-        highlightOpacity: Double = 0.5,
+        highlightOpacity: Double = 1,
+        highlightDarkening: Double = 0.12,
         action: @escaping () -> Void
     ) {
         self.init(action: action) { highlight in
@@ -1185,6 +1203,7 @@ public extension SwipeAction where Label == Text, Background == Color {
             backgroundColor
                 .opacity(highlight ? highlightOpacity : 1)
         }
+        self.highlightDarkening = min(max(highlightDarkening, 0), 1)
     }
 }
 
@@ -1192,7 +1211,8 @@ public extension SwipeAction where Label == Image, Background == Color {
     init(
         systemImage: String,
         backgroundColor: Color = Color.primary.opacity(0.1),
-        highlightOpacity: Double = 0.5,
+        highlightOpacity: Double = 1,
+        highlightDarkening: Double = 0.12,
         action: @escaping () -> Void
     ) {
         self.init(action: action) { highlight in
@@ -1201,6 +1221,7 @@ public extension SwipeAction where Label == Image, Background == Color {
             backgroundColor
                 .opacity(highlight ? highlightOpacity : 1)
         }
+        self.highlightDarkening = min(max(highlightDarkening, 0), 1)
     }
 }
 
@@ -1210,7 +1231,8 @@ public extension SwipeAction where Label == VStack<TupleView<(ModifiedContent<Im
         systemImage: String,
         imageFont: Font? = .title2,
         backgroundColor: Color = Color.primary.opacity(0.1),
-        highlightOpacity: Double = 0.5,
+        highlightOpacity: Double = 1,
+        highlightDarkening: Double = 0.12,
         action: @escaping () -> Void
     ) {
         self.init(action: action) { highlight in
@@ -1224,6 +1246,7 @@ public extension SwipeAction where Label == VStack<TupleView<(ModifiedContent<Im
             backgroundColor
                 .opacity(highlight ? highlightOpacity : 1)
         }
+        self.highlightDarkening = min(max(highlightDarkening, 0), 1)
     }
 }
 
@@ -1298,6 +1321,13 @@ public extension SwipeAction {
     func swipeActionChangeLabelVisibilityOnly(_ value: Bool) -> SwipeAction {
         var view = self
         view.changeLabelVisibilityOnly = value
+        return view
+    }
+
+    /// The amount of black overlay applied while pressed or ready to trigger.
+    func swipeActionHighlightDarkening(_ value: Double) -> SwipeAction {
+        var view = self
+        view.highlightDarkening = min(max(value, 0), 1)
         return view
     }
 }

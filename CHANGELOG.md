@@ -1,5 +1,13 @@
 # Fork changelog
 
+## 0.2.1 — 2026-09-18
+
+- Keeps swipe actions fully opaque after their reveal completes.
+- Darkens the edge action when an over-swipe enters the trigger state instead
+  of reducing the action background to half opacity.
+- Adds configurable `highlightDarkening` feedback to all actions while
+  preserving explicit `highlightOpacity` calls.
+
 ## 0.1.0 — 2026-09-08
 
 First versioned baseline of the `alooooooone/SwipeActions` fork. These versions

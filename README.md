@@ -63,6 +63,13 @@ Check out the [example app](https://github.com/aheze/SwipeActions/archive/refs/h
 
 SwipeActions supports over 20 modifiers for customization. To use them, simply attach the modifier to `SwipeAction`/`SwipeView`.
 
+Standard actions reveal from transparent to fully opaque between
+`swipeActionsVisibleStartPoint` and `swipeActionsVisibleEndPoint`. When an edge
+action crosses the full-swipe trigger threshold, its background darkens while
+remaining fully opaque. The convenience initializers expose
+`highlightDarkening` and the source-compatible `highlightOpacity` parameter
+for custom feedback.
+
 ```swift
 SwipeView {
     Text("Hello")
@@ -106,6 +113,9 @@ func swipeActionLabelHorizontalPadding(_ value: Double = 16)
 
 /// The opacity of the swipe actions, determined by `actionsVisibleStartPoint` and `actionsVisibleEndPoint`.
 func swipeActionChangeLabelVisibilityOnly(_ value: Bool) 
+
+/// Black overlay applied while pressed or ready to trigger. Defaults to `0.12`.
+func swipeActionHighlightDarkening(_ value: Double)
 ```
 
 ```swift

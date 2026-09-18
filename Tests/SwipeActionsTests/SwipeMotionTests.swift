@@ -3,6 +3,41 @@ import XCTest
 @testable import SwipeActions
 
 final class SwipeMotionTests: XCTestCase {
+    func testActionRevealFadesInThenStaysFullyOpaque() {
+        XCTAssertEqual(
+            SwipeActionAppearance.revealOpacity(
+                draggedLength: 8,
+                startPoint: 8,
+                endPoint: 48
+            ),
+            0
+        )
+        XCTAssertEqual(
+            SwipeActionAppearance.revealOpacity(
+                draggedLength: 28,
+                startPoint: 8,
+                endPoint: 48
+            ),
+            0.5
+        )
+        XCTAssertEqual(
+            SwipeActionAppearance.revealOpacity(
+                draggedLength: 48,
+                startPoint: 8,
+                endPoint: 48
+            ),
+            1
+        )
+        XCTAssertEqual(
+            SwipeActionAppearance.revealOpacity(
+                draggedLength: 240,
+                startPoint: 8,
+                endPoint: 48
+            ),
+            1
+        )
+    }
+
     func testActionVerticalOverflowDefaultsToZeroAndClampsNegativeValues() {
         let swipeView = SwipeView {
             EmptyView()
